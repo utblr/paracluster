@@ -1,0 +1,106 @@
+#+TITLE: Spectral Clustering with CUDA and Gnu Scientific Library
+#+AUTHOR: Ufuk Baler
+
+* Adjacency matrix ($A$) computation
+\[ A_{ij} = w_{ij} \]
+\[ A_{ij} = 0 \]
+* Laplacian matrix ($L$)
+\[ L = D - A \]
+\[ d_i = \sum_{\{j|(i,j)\elem E\}} w_{ij} \]
+* Computation of eigenvalues/eigenvectors of real symmetric matrix: ~symmv.c~
+\[ A x = \lambda x \]
+$\nu$ is the eigenvector.
+$\mu$ is the eigenvalue.
+** Reduction to tridiagonal form
+*** ~chop_small_elements()~ in ~qrstep.c~
+#+BEGIN_SRC c
+static void
+chop_small_elements (const size_t N, const double d[], double sd[])
+{
+  double d_i = d[0];
+
+  size_t i;
+
+  for (i = 0; i < N - 1; i++)
+    {
+      double sd_i = sd[i];
+      double d_ip1 = d[i + 1];
+
+      if (fabs (sd_i) < GSL_DBL_EPSILON * (fabs (d_i) + fabs (d_ip1)))
+        {
+          sd[i] = 0.0;
+        }
+      d_i = d_ip1;
+    }
+}
+#+END_SRC
+We have a ~for~ loop here.
+
+** QR iteration with implicit
+*** ~qrstep()~ in ~qrstep.c~
+#+BEGIN_SRC c
+  for (k = 0; k < n - 1; k++)
+    {
+      double c, s;
+      create_givens (x, z, &c, &s);
+
+      /* store Givens rotation */
+      if (gc != NULL)
+        gc[k] = c; 
+      if (gs != NULL)
+        gs[k] = s;
+
+      /* compute G' T G */
+
+      {
+        double bk1 = c * bk - s * zk;
+
+        double ap1 = c * (c * ap - s * bp) + s * (s * aq - c * bp);
+        double bp1 = c * (s * ap + c * bp) - s * (s * bp + c * aq);
+        double zp1 = -s * bq;
+
+        double aq1 = s * (s * ap + c * bp) + c * (s * bp + c * aq);
+        double bq1 = c * bq;
+
+        ak = ap1;
+        bk = bp1;
+        zk = zp1;
+
+        ap = aq1;
+        bp = bq1;
+
+        if (k < n - 2)
+          aq = d[k + 2];
+        if (k < n - 3)
+          bq = sd[k + 2];
+
+        d[k] = ak;
+
+        if (k > 0)
+          sd[k - 1] = bk1;
+
+        if (k < n - 2)
+          sd[k + 1] = bp;
+
+        x = bk;
+        z = zk;
+      }
+    }
+#+END_SRC    
+
+* Challenges
+** Installation of CUDA for Fermi GPUs
+I did some /Hello world/ and vector summation test runs, but unfortunately I got a CUDA error:
+#+BEGIN_SRC text
+[ufuk@Z820 Scripts]$ ./hello 
+Fatal error: kernel fail (no kernel image is available for execution on the device at hello.cu:27)
+#+END_SRC
+
+There is a *compatibility issue* regarding architecture and CUDA toolkit version.
+[[https://arnon.dk/matching-sm-architectures-arch-and-gencode-for-various-nvidia-cards/][https://arnon.dk/matching-sm-architectures-arch-and-gencode-for-various-nvidia-cards/]]
+
+~sm_20~ is the *compute capability* (CC) that is needed and has *deprecated* from CUDA 9.
+
+As this [[https://stackoverflow.com/a/28933055][forum thread]] points out that CC 2.0 is avaliable for CUDA 7.x and 8.0, which are not in the user repository.
+
+I cannot find *below* CUDA 9 in my OS (Arch Linux). There is a small possibility that [[https://releases.ubuntu.com/16.04/][Ubuntu 16.04]] is capable of running CUDA 8.0.
